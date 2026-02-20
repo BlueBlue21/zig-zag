@@ -5,8 +5,26 @@ const c = @cImport({
     @cInclude("GLFW/glfw3.h");
 });
 
-const window_width: i32 = 800;
-const window_height: i32 = 600;
+const window_width: u32 = 800;
+const window_height: u32 = 600;
+
+// TODO: load shader from file
+const vertexShaderSource: [:0]const u8 =
+    \\#version 330 core
+    \\layout (location = 0) in vec3 aPos;
+    \\void main()
+    \\{
+    \\  gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);
+    \\}
+;
+const fragmentShaderSource: [:0]const u8 =
+    \\#version 330 core
+    \\out vec4 FragColor;
+    \\void main()
+    \\{
+    \\  FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);
+    \\}
+;
 
 pub fn main() void {
     if (c.glfwInit() == 0) {
@@ -26,15 +44,74 @@ pub fn main() void {
     }
 
     c.glfwMakeContextCurrent(window);
+    _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 
     const loader: c.GLADloadproc = @ptrCast(&c.glfwGetProcAddress);
     if (c.gladLoadGLLoader(loader) == 0) {
-        std.debug.print("GLAD init failed.\n", .{});
+        std.debug.print("GLAD load failed.\n", .{});
         return;
     }
 
-    c.glViewport(0, 0, window_width, window_height);
-    _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
+    // TODO: code optimize
+    const vertexShader: u32 = c.glCreateShader(c.GL_VERTEX_SHADER);
+    c.glShaderSource(vertexShader, 1, &vertexShaderSource.ptr, null);
+    c.glCompileShader(vertexShader);
+
+    var success: i32 = 0;
+    var infoLog = std.mem.zeroes([512]u8);
+
+    c.glGetShaderiv(vertexShader, c.GL_COMPILE_STATUS, &success);
+    if (success == 0) {
+        c.glGetShaderInfoLog(vertexShader, infoLog.len, null, infoLog[0..].ptr);
+        std.debug.print("Shader compile failed.\n{s}", .{infoLog[0..]});
+
+        return;
+    }
+
+    const fragmentShader: u32 = c.glCreateShader(c.GL_FRAGMENT_SHADER);
+    c.glShaderSource(fragmentShader, 1, &fragmentShaderSource.ptr, null);
+    c.glCompileShader(fragmentShader);
+
+    c.glGetShaderiv(fragmentShader, c.GL_COMPILE_STATUS, &success);
+    if (success == 0) {
+        c.glGetShaderInfoLog(fragmentShader, infoLog.len, null, infoLog[0..].ptr);
+        std.debug.print("Shader compile failed.\n{s}", .{infoLog[0..]});
+
+        return;
+    }
+
+    const vertices = [_]f32{
+        -0.5, -0.5, 0.0, // left
+        0.5, -0.5, 0.0, // right
+        0.0, 0.5, 0.0, //top
+    };
+
+    var vbo: u32 = 0;
+    c.glGenBuffers(1, &vbo);
+    c.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
+
+    c.glBufferData(
+        c.GL_ARRAY_BUFFER,
+        @sizeOf(@TypeOf(vertices)),
+        vertices[0..].ptr,
+        c.GL_STATIC_DRAW,
+    );
+
+    const shaderProgram: u32 = c.glCreateProgram();
+    c.glAttachShader(shaderProgram, vertexShader);
+    c.glAttachShader(shaderProgram, fragmentShader);
+    c.glLinkProgram(shaderProgram);
+
+    c.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, &success);
+    if (success == 0) {
+        c.glGetProgramInfoLog(shaderProgram, infoLog.len, null, infoLog[0..].ptr);
+        std.debug.print("Shader compile failed.\n{s}", .{infoLog[0..]});
+
+        return;
+    }
+
+    c.glDeleteShader(vertexShader);
+    c.glDeleteShader(fragmentShader);
 
     while (c.glfwWindowShouldClose(window) == 0) {
         processInput(window);
@@ -42,22 +119,7 @@ pub fn main() void {
         c.glClearColor(0.2, 0.3, 0.3, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT);
 
-        const vertices = [_]f32{
-            -0.5, -0.5, 0.0, // left
-            0.5, -0.5, 0.0, // right
-            0.0, 0.5, 0.0, //top
-        };
-
-        var vbo: u32 = undefined;
-        c.glGenBuffers(1, &vbo);
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
-
-        c.glBufferData(
-            c.GL_ARRAY_BUFFER,
-            @sizeOf(@TypeOf(vertices)),
-            &vertices,
-            c.GL_STATIC_DRAW,
-        );
+        c.glUseProgram(shaderProgram);
 
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
@@ -68,7 +130,7 @@ fn framebufferSizeCallback(_: ?*c.GLFWwindow, width: i32, height: i32) callconv(
     c.glViewport(0, 0, width, height);
 }
 
-fn processInput(window: ?*c.GLFWwindow) callconv(.c) void {
+fn processInput(window: ?*c.GLFWwindow) void {
     if (c.glfwGetKey(window, c.GLFW_KEY_ESCAPE) == c.GLFW_PRESS)
         c.glfwSetWindowShouldClose(window, 1);
 }
