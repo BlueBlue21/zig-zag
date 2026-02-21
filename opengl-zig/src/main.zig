@@ -22,7 +22,7 @@ const fragmentShaderSource: [:0]const u8 =
     \\out vec4 FragColor;
     \\void main()
     \\{
-    \\  FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);
+    \\  FragColor = vec4(0.8, 0.8, 0.8, 1.0);
     \\}
 ;
 
@@ -36,8 +36,15 @@ pub fn main() void {
     c.glfwWindowHint(c.GLFW_CONTEXT_VERSION_MAJOR, 3);
     c.glfwWindowHint(c.GLFW_CONTEXT_VERSION_MINOR, 3);
     c.glfwWindowHint(c.GLFW_OPENGL_PROFILE, c.GLFW_OPENGL_CORE_PROFILE);
+    c.glfwWindowHint(c.GLFW_SAMPLES, 8);
 
-    const window = c.glfwCreateWindow(window_width, window_height, "Hello, OpenGL!", null, null);
+    const window = c.glfwCreateWindow(
+        window_width,
+        window_height,
+        "Hello, OpenGL!",
+        null,
+        null,
+    );
     if (window == null) {
         std.debug.print("Window create failed.\n", .{});
         return;
@@ -52,18 +59,26 @@ pub fn main() void {
         return;
     }
 
+    _ = c.glEnable(c.GL_MULTISAMPLE);
+
     // TODO: code optimize
     const vertexShader: u32 = c.glCreateShader(c.GL_VERTEX_SHADER);
     c.glShaderSource(vertexShader, 1, &vertexShaderSource.ptr, null);
     c.glCompileShader(vertexShader);
 
     var success: i32 = 0;
-    var infoLog = std.mem.zeroes([512]u8);
+    var infoLog: [512]u8 = undefined;
+    var logLength: i32 = 0;
 
     c.glGetShaderiv(vertexShader, c.GL_COMPILE_STATUS, &success);
     if (success == 0) {
-        c.glGetShaderInfoLog(vertexShader, infoLog.len, null, infoLog[0..].ptr);
-        std.debug.print("Shader compile failed.\n{s}", .{infoLog[0..]});
+        c.glGetShaderInfoLog(
+            vertexShader,
+            infoLog.len,
+            &logLength,
+            infoLog[0..].ptr,
+        );
+        std.debug.print("Shader compile failed.\n{s}", .{infoLog[0..@intCast(logLength)]});
 
         return;
     }
@@ -74,28 +89,16 @@ pub fn main() void {
 
     c.glGetShaderiv(fragmentShader, c.GL_COMPILE_STATUS, &success);
     if (success == 0) {
-        c.glGetShaderInfoLog(fragmentShader, infoLog.len, null, infoLog[0..].ptr);
-        std.debug.print("Shader compile failed.\n{s}", .{infoLog[0..]});
+        c.glGetShaderInfoLog(
+            fragmentShader,
+            infoLog.len,
+            &logLength,
+            infoLog[0..].ptr,
+        );
+        std.debug.print("Shader compile failed.\n{s}", .{infoLog[0..@intCast(logLength)]});
 
         return;
     }
-
-    const vertices = [_]f32{
-        -0.5, -0.5, 0.0, // left
-        0.5, -0.5, 0.0, // right
-        0.0, 0.5, 0.0, //top
-    };
-
-    var vbo: u32 = 0;
-    c.glGenBuffers(1, &vbo);
-    c.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
-
-    c.glBufferData(
-        c.GL_ARRAY_BUFFER,
-        @sizeOf(@TypeOf(vertices)),
-        vertices[0..].ptr,
-        c.GL_STATIC_DRAW,
-    );
 
     const shaderProgram: u32 = c.glCreateProgram();
     c.glAttachShader(shaderProgram, vertexShader);
@@ -104,8 +107,13 @@ pub fn main() void {
 
     c.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, &success);
     if (success == 0) {
-        c.glGetProgramInfoLog(shaderProgram, infoLog.len, null, infoLog[0..].ptr);
-        std.debug.print("Shader compile failed.\n{s}", .{infoLog[0..]});
+        c.glGetProgramInfoLog(
+            shaderProgram,
+            infoLog.len,
+            &logLength,
+            infoLog[0..].ptr,
+        );
+        std.debug.print("Program link failed.\n{s}", .{infoLog[0..@intCast(logLength)]});
 
         return;
     }
@@ -113,13 +121,51 @@ pub fn main() void {
     c.glDeleteShader(vertexShader);
     c.glDeleteShader(fragmentShader);
 
+    const vertices = [_]f32{
+        -0.5, -0.5, 0.0, // left
+        0.5, -0.5, 0.0, // right
+        0.0, 0.5, 0.0, //top
+    };
+
+    var vao: u32 = 0;
+    var vbo: u32 = 0;
+
+    c.glGenVertexArrays(1, &vao);
+    c.glGenBuffers(1, &vbo);
+
+    c.glBindVertexArray(vao);
+
+    c.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
+    c.glBufferData(
+        c.GL_ARRAY_BUFFER,
+        @sizeOf(@TypeOf(vertices)),
+        vertices[0..].ptr,
+        c.GL_STATIC_DRAW,
+    );
+
+    c.glVertexAttribPointer(
+        0,
+        3,
+        c.GL_FLOAT,
+        c.GL_FALSE,
+        3 * @sizeOf(f32),
+        @ptrFromInt(0),
+    );
+    c.glEnableVertexAttribArray(0);
+
+    c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
+
+    c.glBindVertexArray(0);
+
     while (c.glfwWindowShouldClose(window) == 0) {
         processInput(window);
 
-        c.glClearColor(0.2, 0.3, 0.3, 1.0);
+        c.glClearColor(0.2, 0.4, 0.6, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT);
 
         c.glUseProgram(shaderProgram);
+        c.glBindVertexArray(vao);
+        c.glDrawArrays(c.GL_TRIANGLES, 0, 3);
 
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
